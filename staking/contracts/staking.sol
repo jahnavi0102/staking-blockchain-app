@@ -32,21 +32,21 @@ contract Stakings is Ownable {
     struct WithdrawRequest {
         address walletAddress;
         uint256 amount;
+        uint256 deposit;
+        uint256 rewardEarned;
         uint256 plan;
+        uint256 index;
         string chainLink;
     }
     uint256 constant withdrawRequestLength = 0;
-    uint256 constant withdrawRequestLength7Days = 0;
-    uint256 constant withdrawRequestLength30Days = 0;
-    uint256 constant withdrawRequestLength90Days = 0;
-
     
     WithdrawRequest[] WithdrawRequests;
 
     uint256 constant SEC_OF_7_DAYS = 604800;
     uint256 constant SEC_OF_30_DAYS = 2592000;
     uint256 constant SEC_OF_90_DAYS = 7776000;
-    uint256 constant NO_OF_DAYS_IN_A_YEAR = 31536000;
+
+    uint256 constant NO_OF_DAYS_IN_A_YEAR = 365;
 
     constructor(address _initialOwner) Ownable(_initialOwner)  {
         token = IERC20(_initialOwner);
@@ -54,10 +54,10 @@ contract Stakings is Ownable {
 
     function getReward(uint256 amount, uint256 no_of_days, uint256 planNo) public pure returns (uint256) {
         if (planNo == DefaultPlan){
-            return amount.mul(planNo).mul(no_of_days).div(NO_OF_DAYS_IN_A_YEAR);
+            return (amount.mul(planNo).mul(no_of_days)).div(NO_OF_DAYS_IN_A_YEAR.mul(100));
         }
         else {
-            return amount.mul(planNo);
+            return (amount.mul(planNo)).div(100);
         }
             
     }
@@ -72,7 +72,8 @@ contract Stakings is Ownable {
 
         if (planNo == DefaultPlan){
             if (defaultStakers[msg.sender].balance > 0) {
-                uint256 reward = getReward(defaultStakers[msg.sender].balance, block.timestamp - defaultStakers[msg.sender].depositTime, planNo);
+                uint noDays = (block.timestamp.sub(defaultStakers[msg.sender].depositTime)).div(60).div(60).div(24);
+                uint256 reward = getReward(defaultStakers[msg.sender].balance, noDays, planNo);
                 defaultStakers[msg.sender].balance = defaultStakers[msg.sender].balance.add(reward).add(amount);
             } else {
                 defaultStakers[msg.sender].balance = amount;
@@ -112,36 +113,49 @@ contract Stakings is Ownable {
         require(userAddress == msg.sender, "Not Authorized");
         require(planNo == DefaultPlan || planNo == DaysOf7Plan || planNo == DaysOf30Plan || planNo == DaysOf90Plan, "Plan doesn't exist");
         uint256 refundAmount;
+        uint256 reward;
+        StakeInfo memory userLoanInfo;
+        uint256 timeSec = 0;
+        uint256 index = 0;
+        uint256 deposited;
+
         if (planNo == DefaultPlan){
             require(defaultStakers[msg.sender].withdraw == false, "Request sent for withdraw, will soon be added to your account");
             require(defaultStakers[msg.sender].balance > 0, "No amount to withdraw");
-            uint256 reward = getReward(defaultStakers[msg.sender].balance, block.timestamp - defaultStakers[msg.sender].depositTime, planNo);
-            refundAmount = defaultStakers[msg.sender].balance.add(reward);
+            userLoanInfo = defaultStakers[msg.sender];
+            timeSec = block.timestamp - userLoanInfo.depositTime;
             defaultStakers[msg.sender].balance = 0;
             defaultStakers[msg.sender].withdraw = false;
+            
         }
         else if (planNo == DaysOf7Plan) {
-            require(block.timestamp.sub(plan7Days[msg.sender][depositWithdrawTrack[msg.sender][planNo]].depositTime)>=0, "Loan not matured");
-            uint256 reward = getReward(plan7Days[msg.sender][depositWithdrawTrack[msg.sender][planNo]].balance, 0, planNo);
-            refundAmount =  plan7Days[msg.sender][depositWithdrawTrack[msg.sender][planNo]].balance.add(reward);
+            require(block.timestamp.sub(plan7Days[msg.sender][depositWithdrawTrack[msg.sender][planNo]].depositTime)>=SEC_OF_7_DAYS, "Loan not matured");
+            userLoanInfo = plan7Days[msg.sender][depositWithdrawTrack[msg.sender][planNo]];
+            index = depositWithdrawTrack[msg.sender][planNo];
             depositWithdrawTrack[msg.sender][planNo] = depositWithdrawTrack[msg.sender][planNo].add(increment);
         }
         else if (planNo == DaysOf30Plan) {
-            require(block.timestamp.sub(plan30Days[msg.sender][depositWithdrawTrack[msg.sender][planNo]].depositTime)>=0, "Loan not matured");
-            uint256 reward = getReward(plan30Days[msg.sender][depositWithdrawTrack[msg.sender][planNo]].balance, 0, planNo);
-            refundAmount =  plan30Days[msg.sender][depositWithdrawTrack[msg.sender][planNo]].balance.add(reward);
+            require(block.timestamp.sub(plan30Days[msg.sender][depositWithdrawTrack[msg.sender][planNo]].depositTime)>=SEC_OF_30_DAYS, "Loan not matured");
+            userLoanInfo = plan30Days[msg.sender][depositWithdrawTrack[msg.sender][planNo]];
+            index = depositWithdrawTrack[msg.sender][planNo];
             depositWithdrawTrack[msg.sender][planNo] = depositWithdrawTrack[msg.sender][planNo].add(increment);
         }
         else if (planNo == DaysOf90Plan) {
-            require(block.timestamp.sub(plan90Days[msg.sender][depositWithdrawTrack[msg.sender][planNo]].depositTime)>=0,  "Loan not matured");
-            uint256 reward = getReward(plan90Days[msg.sender][depositWithdrawTrack[msg.sender][planNo]].balance, 0, planNo);
-            refundAmount =  plan90Days[msg.sender][depositWithdrawTrack[msg.sender][planNo]].balance.add(reward);
+            require(block.timestamp.sub(plan90Days[msg.sender][depositWithdrawTrack[msg.sender][planNo]].depositTime)>=SEC_OF_90_DAYS,  "Loan not matured");
+            userLoanInfo = plan7Days[msg.sender][depositWithdrawTrack[msg.sender][planNo]];
+            index = depositWithdrawTrack[msg.sender][planNo];
             depositWithdrawTrack[msg.sender][planNo] = depositWithdrawTrack[msg.sender][planNo].add(increment);
         }
 
+        deposited = userLoanInfo.balance;
+        reward = getReward(deposited, timeSec, planNo);
+        refundAmount = deposited.add(reward);
         WithdrawRequests.push(WithdrawRequest({
                 walletAddress: msg.sender,
                 amount: refundAmount,
+                rewardEarned:reward,
+                deposit: deposited,
+                index: index,
                 plan: planNo,
                 chainLink: _chainLink
             }));
@@ -152,4 +166,24 @@ contract Stakings is Ownable {
         delete withdrawRequestTerminated;
         return withdrawRequestTerminated ;
     }
+
+
+    function getDetailsUserStakeInfo(address _address, uint256 planNo, uint256 index) external onlyOwner view returns(StakeInfo memory) {
+        if (planNo == DefaultPlan) {
+            return defaultStakers[_address];
+        }
+        else if (planNo == DaysOf7Plan){
+            return plan7Days[_address][index];
+        }
+        else if (planNo == DaysOf30Plan){
+            return plan30Days[_address][index];
+        }
+        else if (planNo == DaysOf90Plan){
+            return plan90Days[_address][index];
+        }
+        else {
+            revert("Invalid planNo"); // Add a revert statement for invalid planNo
+        }
+    }
+
 }
